@@ -1,0 +1,6 @@
+[package]
+name = "eecs-495-hw4"
+version = "0.1.0"
+authors = ["Andy <andrewmcconnell2016@u.northwestern.edu>"]
+
+[dependencies]
