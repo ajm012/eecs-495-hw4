@@ -11,18 +11,25 @@ pub fn handle_client(mut stream: TcpStream) {
 
     let input = parse_input(&input_str);
     if !check_faulty_input(&input) {
-        let response = b"Input not formatted properly. Exiting.\n";
+        let response = b"HTTP/1.1 400 Bad Request\n";
         match stream.write(response) {
-            Ok(_) => println!("Bad response sent"),
+            Ok(_) => println!("400 Sent - Bad Request"),
             Err(e) => println!("Failed sending response: {}", e),
         }
     }
     else {
         let response = get_file(input[1]);
-        if response == "error" {
-            let response = b"HTTP/1.1 404 File Not Found";
+        if response == "403" { // File restricted
+            let response = b"HTTP/1.1 403 Forbidden\n";
             match stream.write(response) {
-                Ok(_) => println!("Bad response sent"),
+                Ok(_) => println!("403 Sent - Forbidden"),
+                Err(e) => println!("Failed sending response: {}", e),
+            }
+        }
+        if response == "404" { // File not found
+            let response = b"HTTP/1.1 404 File Not Found\n";
+            match stream.write(response) {
+                Ok(_) => println!("404 Sent - File Not Found"),
                 Err(e) => println!("Failed sending response: {}", e),
             }
         }
@@ -64,7 +71,7 @@ fn parse_input(i_str: &str) -> Input {
 // Returns true if Input vector is properly formatted,
 // false if otherwise
 fn check_faulty_input(input: &Input) -> bool {
-    //if input.len() != 3 {return false;}
+    if input.len() != 3 {return false;}
     if input[0] != "GET" {return false;}
     //if input[2] != "HTTP" {return false;} // fix this to allow forward-compatibility
     return true;
@@ -76,9 +83,12 @@ fn get_file(filename: &str) -> String {
     //let mut file = File::open("/Users/andrewmcconnell/Desktop/Rust/eecs-495-hw4/src/main.rs").expect("Unable to open the file");
     let mut file = match File::open(filename) {
         Ok(file) => file,
-        Err(_) => {return "error".to_string();},
+        Err(_) => {return "404".to_string();},
     };
     let mut contents = String::new();
-    file.read_to_string(&mut contents).expect("Unable to read the file");
+    match file.read_to_string(&mut contents) {
+        Ok(_) => {},
+        Err(_) => {return "403".to_string();},
+    }
     return contents;
 }
