@@ -1,6 +1,18 @@
-use std::net::{TcpStream, TcpListener};
-use std::io::{Read, Write};
+//! WEB_SERVER
+//! Homework 4
+//!
+//! This program takes an association list as input, as well as  
+//! a start and end point on the graph from user input.
+//! By constructing a specialized graph struct, the program searches
+//! for a path between the two identified points, then requests another
+//! pair. The program terminates when the user inputs a blank line or 
+//! 999.
+//!
+use std::net::TcpListener;
 use std::thread;
+
+mod server_handler;
+use server_handler::handle_client;
 
 fn main() {
     let listener = TcpListener::bind("localhost:8080").unwrap();
@@ -22,34 +34,6 @@ fn main() {
     }
 }
 
-fn handle_read(mut stream: &TcpStream) -> String {
-    let mut buf = [0u8 ;4096];
-    match stream.read(&mut buf) {
-        Ok(_) => {
-            let req_str = String::from_utf8_lossy(&buf);
-            //println!("{}", req_str.to_string());
-            return req_str.to_string();
-            },
-        Err(e) => {
-            println!("Unable to read stream: {}", e);
-            return "Error".to_string();
-        },
-    }
-}
 
-fn handle_write(mut stream: TcpStream) {
-    let response = b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n<html><body>Hello world</body></html>\r\n";
-    match stream.write(response) {
-        Ok(_) => println!("Response sent"),
-        Err(e) => println!("Failed sending response: {}", e),
-    }
-}
-
-fn handle_client(stream: TcpStream) {
-    let input = handle_read(&stream);
-    println!("Returns!");
-    println!("{}", input);
-    handle_write(stream);
-}
 
 
