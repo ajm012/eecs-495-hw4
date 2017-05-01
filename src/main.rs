@@ -10,12 +10,19 @@
 //!
 use std::net::TcpListener;
 use std::thread;
+//use std::io::prelude::*;
+//use std::fs::File;
 
 mod server_handler;
 use server_handler::handle_client;
 
 fn main() {
-    let listener = TcpListener::bind("localhost:8080").unwrap();
+    /*let mut file = File::open("/Users/andrewmcconnell/Desktop/Rust/eecs-495-hw4/src/main.rs").expect("Unable to open the file");
+    let mut contents = String::new();
+    file.read_to_string(&mut contents).expect("Unable to read the file");
+    println!("{}", contents);*/
+
+    let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
     println!("Listening for connections on port {}", 8080);
 
     for stream in listener.incoming() {
@@ -33,7 +40,3 @@ fn main() {
         }
     }
 }
-
-
-
-
