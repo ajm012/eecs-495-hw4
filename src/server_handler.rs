@@ -1,7 +1,7 @@
 use std::net::TcpStream;
 use std::io::{Read, Write};
 //use std::io::prelude::*;
-use std::fs::File;
+use std::fs::{File, metadata};
 
 type Input<'a> = Vec<&'a str>;
 
@@ -18,7 +18,7 @@ pub fn handle_client(mut stream: TcpStream) {
         }
     }
     else {
-        let response = get_file(input[1]);
+        let response = get_file(input[1].clone());
         if response == "403" { // File restricted
             let response = b"HTTP/1.1 403 Forbidden\n";
             match stream.write(response) {
@@ -26,7 +26,7 @@ pub fn handle_client(mut stream: TcpStream) {
                 Err(e) => println!("Failed sending response: {}", e),
             }
         }
-        if response == "404" { // File not found
+        else if response == "404" { // File not found
             let response = b"HTTP/1.1 404 File Not Found\n";
             match stream.write(response) {
                 Ok(_) => println!("404 Sent - File Not Found"),
@@ -73,18 +73,37 @@ fn parse_input(i_str: &str) -> Input {
 fn check_faulty_input(input: &Input) -> bool {
     if input.len() != 3 {return false;}
     if input[0] != "GET" {return false;}
+    if input[1].chars().nth(0).unwrap() != '/' {return false;}
     //if input[2] != "HTTP" {return false;} // fix this to allow forward-compatibility
     return true;
 }
 
 // Searches for the correct file, returns "error" is not found
-fn get_file(filename: &str) -> String {
+fn get_file(mut filename: &str) -> String {
     println!("Attempting to open {}", filename);
-    //let mut file = File::open("/Users/andrewmcconnell/Desktop/Rust/eecs-495-hw4/src/main.rs").expect("Unable to open the file");
+
+    let md = match metadata(filename) {
+        Ok(file) => file,
+        Err(_) => {return "404".to_string();}, 
+    };
+    if md.is_dir() {
+        println!("Directory found...attempting to find index.html");
+        let check1 = get_file(format!("{}{}", filename, "/index.html").as_str());
+        if check1 != "404" {return check1;}
+        println!("Directory found...attempting to find index.shtml");
+        let check2 = get_file(format!("{}{}", filename, "/index.shtml").as_str());
+        if check2 != "404" {return check2;}
+        println!("Directory found...attempting to find index.txt");
+        let check3 = get_file(format!("{}{}", filename, "/index.txt").as_str());
+        if check3 != "404" {return check3;}
+        else {return check3;}
+    }
+
     let mut file = match File::open(filename) {
         Ok(file) => file,
-        Err(_) => {return "404".to_string();},
+        Err(_) => {return "404".to_string();}, 
     };
+    //let mut file = File::open("/Users/andrewmcconnell/Desktop/Rust/eecs-495-hw4/src/main.rs").expect("Unable to open the file");
     let mut contents = String::new();
     match file.read_to_string(&mut contents) {
         Ok(_) => {},
