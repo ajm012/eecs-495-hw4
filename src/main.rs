@@ -8,21 +8,24 @@
 //! pair. The program terminates when the user inputs a blank line or 
 //! 999.
 //!
+//! ASSUMPTIONS:
+//! -input space after HTTP token will cause faulty response
+//!
+//! TO TEST:
+//! Run this code and seperately connect to 127.0.0.1:8080
+//!      SERVER INPUT  ..................... RESPONSE
+//! GET {/path/to}/src/main.rs HTTP - 200 OK, Content-Length: 1383
+//! GET {/path/to}/src HTTP - 200 OK, Content-Length: 19
+//! GET /a/b/c HTTP - 404 File Not Found
+//! a b c - 400 Bad Request
 
 use std::net::TcpListener;
 use std::thread;
-//use std::io::prelude::*;
-//use std::fs::File;
 
 mod server_handler;
 use server_handler::handle_client;
 
 fn main() {
-    /*let mut file = File::open("/Users/andrewmcconnell/Desktop/Rust/eecs-495-hw4/src/main.rs").expect("Unable to open the file");
-    let mut contents = String::new();
-    file.read_to_string(&mut contents).expect("Unable to read the file");
-    println!("{}", contents);*/
-
     let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
     println!("Listening for connections on port {}", 8080);
 
@@ -31,9 +34,7 @@ fn main() {
         match stream {
             Ok(stream) => {
                 //println!("Creating thread");
-                thread::spawn(|| {
-                    handle_client(stream)
-                });
+                thread::spawn(|| {handle_client(stream)});
             }
             Err(e) => {
                 println!("Unable to connect: {}", e);

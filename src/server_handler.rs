@@ -1,11 +1,10 @@
 use std::net::TcpStream;
 use std::io::{Read, Write};
-//use std::io::prelude::*;
 use std::fs::{File, metadata};
 
 type Input<'a> = Vec<&'a str>;
 
-// Central server point - takes input and generates output
+// Central server function - takes and checks input, generates output
 pub fn handle_client(mut stream: TcpStream) {
     let input_str = handle_read(&stream);
 
@@ -18,22 +17,23 @@ pub fn handle_client(mut stream: TcpStream) {
         }
     }
     else {
+        let is_html = is_html(input[1].clone());
         let response = get_file(input[1].clone());
         if response == "403" { // File restricted
-            let response = b"HTTP/1.1 403 Forbidden\n";
+            let response = b"HTTP/1.0 403 Forbidden\n";
             match stream.write(response) {
                 Ok(_) => println!("403 Sent - Forbidden"),
                 Err(e) => println!("Failed sending response: {}", e),
             }
         }
         else if response == "404" { // File not found
-            let response = b"HTTP/1.1 404 File Not Found\n";
+            let response = b"HTTP/1.0 404 File Not Found\n";
             match stream.write(response) {
                 Ok(_) => println!("404 Sent - File Not Found"),
                 Err(e) => println!("Failed sending response: {}", e),
             }
         }
-        else {handle_write(stream, response);}
+        else {handle_write(stream, response.clone(), is_html, response.len());}
     }
 }
 
@@ -53,9 +53,12 @@ fn handle_read(mut stream: &TcpStream) -> String {
 }
 
 // Writes a response given the input
-fn handle_write(mut stream: TcpStream, response: String) {
+fn handle_write(mut stream: TcpStream, response: String, html: bool, len: usize) {
     //let response2 = b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n<html><body>Hello world</body></html>\r\n";
-    let step1 = format!("{}{}","HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n<html><body>", response);
+    let mut text_type = "plain";
+    if html {text_type = "html";}
+    let step0 = format!("{}{}{}{}{}","HTTP/1.0 200 OK\r\nWeb-Server/0.1\r\nContent-Type: text/",text_type,"\r\nContent-length: ", len, "\r\n\r\n");
+    let step1 = format!("{}{}",step0, response);
     let step2 = format!("{}{}", step1, "</body></html>\r\n");
     match stream.write(step2.as_bytes()) {
         Ok(_) => println!("Response sent"),
@@ -71,15 +74,18 @@ fn parse_input(i_str: &str) -> Input {
 // Returns true if Input vector is properly formatted,
 // false if otherwise
 fn check_faulty_input(input: &Input) -> bool {
+    
     if input.len() != 3 {return false;}
     if input[0] != "GET" {return false;}
     if input[1].chars().nth(0).unwrap() != '/' {return false;}
-    //if input[2] != "HTTP" {return false;} // fix this to allow forward-compatibility
+    //if input[2] != "HTTP" {return false;} // NEEDS TO ALLOW NEWER VERSIONS E.G. HTTP/1.1...REGEX?
     return true;
 }
 
 // Searches for the correct file, returns "error" is not found
-fn get_file(mut filename: &str) -> String {
+// If filename leads to a directory, recursively searches for a
+// index file (.html, .shtml, .txt)
+fn get_file(filename: &str) -> String {
     println!("Attempting to open {}", filename);
 
     let md = match metadata(filename) {
@@ -110,4 +116,13 @@ fn get_file(mut filename: &str) -> String {
         Err(_) => {return "403".to_string();},
     }
     return contents;
+}
+
+// Checks if the file is of type .html
+// If so returns true
+fn is_html(filename: &str) -> bool {
+    let check_rev: String = filename.chars().rev().take(5).collect(); // returns a reverse string (i.e. "lmth." not ".html")
+    let check: String = check_rev.chars().rev().take(5).collect(); 
+    if check == ".html" {println!("HTML found"); return true;}
+    return false;
 }
