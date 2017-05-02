@@ -17,7 +17,7 @@ pub fn handle_client(mut stream: TcpStream) {
         }
     }
     else {
-        let is_html = is_html(input[1].clone());
+        let is_html = is_html(&input[1]);
         let response = get_file(input[1].clone());
         if response == "403" { // File restricted
             let response = b"HTTP/1.0 403 Forbidden\n";
