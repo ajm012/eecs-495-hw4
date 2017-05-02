@@ -1,39 +1,48 @@
 use std::net::TcpStream;
 use std::io::{Read, Write};
 use std::fs::{File, metadata};
+use std::string::String;
 
-type Input<'a> = Vec<&'a str>;
+extern crate regex;
+use self::regex::Regex;
 
 // Central server function - takes and checks input, generates output
-pub fn handle_client(mut stream: TcpStream) {
+pub fn handle_client(stream: TcpStream) {
     let input_str = handle_read(&stream);
+    match parse_request(&input_str) {
+        None => handle_bad_request(stream),
+        Some(path) => handle_valid_request(stream, &path),
+    }
+}
 
-    let input = parse_input(&input_str);
-    if !check_faulty_input(&input) {
-        let response = b"HTTP/1.1 400 Bad Request\n";
+// Processes a bad request and returns an HTTP 400 error code
+fn handle_bad_request(mut stream: TcpStream) {
+    let response = b"HTTP/1.1 400 Bad Request\n";
+    match stream.write(response) {
+        Ok(_) => println!("400 Sent - Bad Request"),
+        Err(e) => println!("Failed sending response: {}", e),
+    }    
+}
+
+// Processes a valid request for a file and returns the file or 
+// an error (forbidden or not found)
+fn handle_valid_request(mut stream: TcpStream, path: &str) {
+    let is_html = is_html(path);
+    let response = get_file(path);
+    if response == "403" { // File restricted
+        let response = b"HTTP/1.0 403 Forbidden\n";
         match stream.write(response) {
-            Ok(_) => println!("400 Sent - Bad Request"),
+            Ok(_) => println!("403 Sent - Forbidden"),
             Err(e) => println!("Failed sending response: {}", e),
         }
-    }
-    else {
-        let is_html = is_html(&input[1]);
-        let response = get_file(input[1].clone());
-        if response == "403" { // File restricted
-            let response = b"HTTP/1.0 403 Forbidden\n";
-            match stream.write(response) {
-                Ok(_) => println!("403 Sent - Forbidden"),
-                Err(e) => println!("Failed sending response: {}", e),
-            }
+    } else if response == "404" { // File not found
+        let response = b"HTTP/1.0 404 File Not Found\n";
+        match stream.write(response) {
+            Ok(_) => println!("404 Sent - File Not Found"),
+            Err(e) => println!("Failed sending response: {}", e),
         }
-        else if response == "404" { // File not found
-            let response = b"HTTP/1.0 404 File Not Found\n";
-            match stream.write(response) {
-                Ok(_) => println!("404 Sent - File Not Found"),
-                Err(e) => println!("Failed sending response: {}", e),
-            }
-        }
-        else {handle_write(stream, response.clone(), is_html, response.len());}
+    } else {
+        handle_write(stream, response.clone(), is_html, response.len());
     }
 }
 
@@ -66,21 +75,28 @@ fn handle_write(mut stream: TcpStream, response: String, html: bool, len: usize)
     }
 }
 
-// Splits input string into a vector of three elements, seperated by spaces
-fn parse_input(i_str: &str) -> Input {
-    return i_str.split(" ").collect();
+// Parses a GET request of the form: GET $web_file_path$ HTTP...
+// and formats $web_file_path$ into a standard file path. Returns None if 
+// the request does not follow the above format, else returns Some(file_path)
+fn parse_request(request: &str) -> Option<String> {
+    let re = Regex::new(r"GET (.*) HTTP(?:.*)").unwrap();
+    match re.captures(request) {
+        Some(caps) => Some(caps.get(1).unwrap().as_str().to_string().replace("%20", " ")),
+        _ => None
+    }
 }
 
-// Returns true if Input vector is properly formatted,
-// false if otherwise
-fn check_faulty_input(input: &Input) -> bool {
-    
-    if input.len() != 3 {return false;}
-    if input[0] != "GET" {return false;}
-    if input[1].chars().nth(0).unwrap() != '/' {return false;}
-    //if input[2] != "HTTP" {return false;} // NEEDS TO ALLOW NEWER VERSIONS E.G. HTTP/1.1...REGEX?
-    return true;
-}
+#[cfg(test)]
+mod parse_request_tests {
+    use super::*;
+
+    #[test]
+    fn parse_valid_request_test() {
+        let request = "GET /Users/feelmyears/Google%20Drive/Spring%20Quarter/EECS%20395/Homework/eecs-495-hw4/src/main.rs HTTP".to_string();
+        let result = parse_request(&request);
+        assert_eq!(result.unwrap(), "/Users/feelmyears/Google Drive/Spring Quarter/EECS 395/Homework/eecs-495-hw4/src/main.rs".to_string());
+    }
+}     
 
 // Searches for the correct file, returns "error" is not found
 // If filename leads to a directory, recursively searches for a
