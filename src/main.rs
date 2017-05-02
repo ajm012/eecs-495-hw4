@@ -30,7 +30,7 @@ fn main() {
     println!("Listening for connections on port {}", 8080);
 
     for stream in listener.incoming() {
-        //println!("Connected stream");
+        println!("Connected stream");
         match stream {
             Ok(stream) => {
                 //println!("Creating thread");
