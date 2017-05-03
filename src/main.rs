@@ -34,7 +34,7 @@ fn main() {
     let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
     println!("Listening for connections on port 8080");
 
-    let log_file = Arc::new(Mutex::new(File::create("server_log.txt").unwrap()));
+    let log_file = Arc::new(Mutex::new(File::create("log.txt").unwrap()));
 
     for stream in listener.incoming() {
         println!("Connected stream");
