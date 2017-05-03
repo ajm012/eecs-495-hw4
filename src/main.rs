@@ -59,9 +59,8 @@ fn main() {
 fn log_response(log_file: &Arc<Mutex<File>>, response: &Response) {
     // Trying to follow format specified in https://en.wikipedia.org/wiki/Common_Log_Format
     // 127.0.0.1 user-identifier frank [10/Oct/2000:13:55:36 -0700] "GET /apache_pb.gif HTTP/1.0" 200 2326
-
     let mut log_file_guard = log_file.lock().unwrap();
-    let output = format!("[{}] \"{}\" {} {}", response.time.rfc3339(), response.request, response.status_code, response.response_size);
+    let output = format!("[{}] \"{}\" {} {}\n", response.time.rfc3339(), response.request.trim(), response.status_code, response.response_size);
     println!("{}", output);
     log_file_guard.write(output.as_bytes()).expect("Failed to log response");
 }

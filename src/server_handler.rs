@@ -54,13 +54,14 @@ fn read_from_stream(mut stream: &TcpStream) -> String {
 // and formats $web_file_path$ into a standard file path. Returns None if 
 // the request does not follow the above format, else returns Some(file_path)
 fn parse_get_request(request: &str) -> Option<PathBuf> {
-    let re = Regex::new(r"GET (.*) HTTP(?:.*)").unwrap();
+    let re = Regex::new(r"GET (/\S+) HTTP(?:.*)").unwrap();
     match re.captures(request) {
         Some(caps) => Some(PathBuf::from(caps.get(1).unwrap().as_str().to_string().replace("%20", " "))),
         _ => None
     }
 }
 
+// Handles a properly formatted get request
 fn handle_get_request(stream: TcpStream, response: &mut Response, path: &PathBuf) {
     match get_file(path) {
         None => handle_file_not_found_request(stream, response),
@@ -74,6 +75,7 @@ fn handle_get_request(stream: TcpStream, response: &mut Response, path: &PathBuf
     }
 }
 
+// Sends a response over to a given TcpStream
 fn respond(mut stream: TcpStream, response: &str) {
     match stream.write(response.as_bytes()) {
         Ok(_) => println!("Successfully responded"),
@@ -81,25 +83,28 @@ fn respond(mut stream: TcpStream, response: &str) {
     }    
 }
 
+// Responds with a 400 Bad Request response
 fn handle_bad_request(stream: TcpStream, response: &mut Response) {
     println!("400 Sent - Bad Request");
     respond(stream, "HTTP/1.0 400 Bad Request\n");
     response.status_code = 400;
 }   
 
-
+// Responds with a 404 File Not Found response
 fn handle_file_not_found_request(stream: TcpStream, response: &mut Response) {
     println!("404 Sent - Fire Not Found");
     respond(stream, "HTTP/1.0 404 File Not Found\n");
     response.status_code = 404;
 }
 
+// Responds with a 403 Forbidden response
 fn handle_forbidden_request(stream: TcpStream, response: &mut Response) {
     println!("403 Sent - Forbidden");
     respond(stream, "HTTP/1.0 403 Forbidden\n");
     response.status_code = 403;
 }
 
+// Responds with the correctly requested content (either html or plain)
 fn handle_content_request(stream: TcpStream, response: &mut Response, contents: String, is_html: bool) {
     println!("200 Sent - Content");
     let text_type = match is_html {
@@ -108,10 +113,13 @@ fn handle_content_request(stream: TcpStream, response: &mut Response, contents: 
     };
 
     let len = contents.len();
-    let step0 = format!("{}{}{}{}{}","HTTP/1.0 200 OK\r\nWeb-Server/0.1\r\nContent-Type: text/",text_type,"\r\nContent-length: ", len, "\r\n\r\n");
-    let step1 = format!("{}{}",step0, contents);
+    // let step0 = format!("{}{}{}{}{}","HTTP/1.0 200 OK\r\nWeb-Server/0.1\r\nContent-Type: text/",text_type,"\r\nContent-length: ", len, "\r\n\r\n");
+    // let step1 = format!("{}{}\n",step0, contents);
 
-    respond(stream, &step1);
+    let content_response = format!("HTTP/1.0 200 OK\r\nWeb-Server/1.0\r\nConent-type: text/{}\r\nContent-length: {}\r\n\r\n{}\n", text_type, len, contents);
+
+    // respond(stream, &step1);
+    respond(stream, &content_response);
     response.status_code = 200;
     response.response_size = len;
 }   
@@ -137,6 +145,7 @@ fn get_file(path: &PathBuf) -> Option<(File, String)> {
     }
 }
 
+// Searches a directory for an index file with extension html, shtml, or txt
 fn get_directory_index_file(path: &PathBuf) ->  Option<(File, String)>  {
     println!("Directory found...attempting to find index file");
     let file_types = vec!["index.html", "index.shtml", "index.txt"];
@@ -151,6 +160,7 @@ fn get_directory_index_file(path: &PathBuf) ->  Option<(File, String)>  {
     return None;
 }
 
+// Gets the contents of a given file and puts it in a String. 
 fn get_file_contents(mut file: File) -> Option<String> {
     let mut contents = String::new();
     match file.read_to_string(&mut contents) {
@@ -164,9 +174,168 @@ mod parse_get_request_tests {
     use super::*;
 
     #[test]
-    fn parse_valid_get_request() {
-        let request = "GET /Users/feelmyears/Google%20Drive/Spring%20Quarter/EECS%20395/Homework/eecs-495-hw4/src/main.rs HTTP";
-        let result = parse_get_request(request);
-        assert_eq!(result.unwrap().to_str().unwrap(), "/Users/feelmyears/Google Drive/Spring Quarter/EECS 395/Homework/eecs-495-hw4/src/main.rs");
+    fn parse_spaced_get_request() {
+        let request = "GET /Users/feelmyears/Google%20Drive/Spring%20Quarter/EECS%20395/Homework/eecs-495-hw4/src/main.rs HTTP\n";
+        let expected = "/Users/feelmyears/Google Drive/Spring Quarter/EECS 395/Homework/eecs-495-hw4/src/main.rs";
+
+        assert_parse(request, expected);
+    }
+
+    #[test]
+    fn parse_unspaced_get_request() {
+        let request = "GET /this/is/a/path/index.html HTTP\n";
+        let expected = "/this/is/a/path/index.html";
+        assert_parse(request, expected);
+    }
+
+    #[test]
+    fn parse_extra_info_get_request() {
+        let request = "GET /this/is/a/path/index.html HTTP/1.1\n blah blah";
+        let expected = "/this/is/a/path/index.html";
+        assert_parse(request, expected);
+    }
+
+    #[test]
+    fn parse_invalid_get_requests() {
+        let invalid_requests = vec![
+            "GET HTTP",
+            "GETHTTP",
+            "GET  /too/many/spaces/lhs HTTP",
+            "GET /too/many/spaces/rhs  HTTP",
+            "PUT /wrong/request HTTP",
+            "GET /incomplete/request ",
+            "GET /misspelled/request HTP",
+        ];
+        
+        for i in invalid_requests {
+            assert_eq!(parse_get_request(i), None);
+        }
+    }
+
+    fn assert_parse(request: &str, expected: &str) {
+        assert_eq!(parse_get_request(request).unwrap().to_str().unwrap(), expected);
     }
 }  
+
+#[cfg(test)]
+mod get_file_tests {
+    use super::*;
+    use std::fs::{remove_dir_all, create_dir_all};
+
+    #[test]
+    fn get_existing_file_test() {
+        let directory = "./test4/directory/";
+        let filename = "./test4/directory/foo.fee";
+
+        {
+            create_dir_all(directory).expect("Failed to create directory"); 
+            let file = File::create(filename);
+        }
+
+        let (file, extension) = get_file(&PathBuf::from(filename)).unwrap();
+        assert_eq!(extension, "fee");
+
+        remove_dir_all("./test4/");
+    }
+
+    #[test]
+    fn get_nonexisting_file_test() {
+        let directory = "./test5/directory/";
+        let filename = "./test5/directory/imnotreal.txt";
+
+        create_dir_all(directory).expect("Failed to create directory"); 
+        assert!(get_file(&PathBuf::from(filename)).is_none());
+
+        remove_dir_all("./test5/");
+    }
+}
+
+#[cfg(test)]
+mod get_directory_index_file_tests {
+    use super::*;
+    use std::fs::{remove_dir_all, create_dir_all};
+
+    #[test]
+    fn get_html_index_file_test() {
+        let directory = "./test/directory/";
+        let filename = "./test/directory/index.html";
+
+        {
+            create_dir_all(directory).expect("Failed to create directory"); 
+            let file = File::create(filename);
+        }
+
+        let (file, extension) = get_directory_index_file(&PathBuf::from(directory)).unwrap();
+        assert_eq!(extension, "html");
+
+        remove_dir_all("./test/");
+    }
+
+    #[test]
+    fn get_shtml_index_file_test() {
+        let directory = "./test1/directory/";
+        let filename = "./test1/directory/index.shtml";
+
+        {
+            create_dir_all(directory).expect("Failed to create directory"); 
+            let file = File::create(filename);
+        }
+
+        let (file, extension) = get_directory_index_file(&PathBuf::from(directory)).unwrap();
+        assert_eq!(extension, "shtml");
+
+        remove_dir_all("./test1/");
+    }
+
+    #[test]
+    fn get_txt_index_file_test() {
+        let directory = "./test2/directory/";
+        let filename = "./test2/directory/index.txt";
+
+        {
+            create_dir_all(directory).expect("Failed to create directory"); 
+            let file = File::create(filename);
+        }
+
+        let (file, extension) = get_directory_index_file(&PathBuf::from(directory)).unwrap();
+        assert_eq!(extension, "txt");
+
+        remove_dir_all("./test2/");
+    }
+
+    #[test]
+    fn no_index_file_test() {
+        let directory = "./test3/directory/";
+        let filename = "./test3/directory/blah.txt";
+
+        {
+            create_dir_all(directory).expect("Failed to create directory"); 
+            let file = File::create(filename);
+        }
+
+        assert!(get_directory_index_file(&PathBuf::from(directory)).is_none());
+        remove_dir_all("./test3/");
+    }
+}
+
+#[cfg(test)]
+mod get_file_contents_tests {
+    use super::*;
+    use std::fs::{remove_file};
+
+    #[test]
+    fn get_file_contents_test() {
+        let contents = "Hello world!";
+        let filename = "test.txt";
+
+        {
+            let mut file = File::create(filename).expect("Failed to create file");
+            file.write(contents.as_bytes()).expect("Failed to write to file");    
+        }
+        
+
+        assert_eq!(get_file_contents(File::open(filename).unwrap()).unwrap(), contents);
+        remove_file(filename);
+    }
+
+}
