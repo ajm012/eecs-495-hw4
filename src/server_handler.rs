@@ -2,52 +2,41 @@ use std::net::TcpStream;
 use std::io::{Read, Write};
 use std::fs::{File, metadata};
 use std::string::String;
+use std::path::PathBuf;
 
 extern crate regex;
 use self::regex::Regex;
 
+extern crate time;
+use self::time::{now_utc, Tm};
+
+pub struct Response {
+    pub status_code: usize,
+    pub request: String,
+    pub response_size: usize,
+    pub time: Tm
+}
+
 // Central server function - takes and checks input, generates output
-pub fn handle_client(stream: TcpStream) {
-    let input_str = handle_read(&stream);
-    match parse_request(&input_str) {
-        None => handle_bad_request(stream),
-        Some(path) => handle_valid_request(stream, &path),
-    }
-}
+pub fn handle_request(stream: TcpStream) -> Response {
+    let request = read_from_stream(&stream);
+    let mut response = Response {
+        status_code: 0,
+        request: request.clone(),
+        response_size: 0,
+        time: now_utc()
+    };
 
-// Processes a bad request and returns an HTTP 400 error code
-fn handle_bad_request(mut stream: TcpStream) {
-    let response = b"HTTP/1.1 400 Bad Request\n";
-    match stream.write(response) {
-        Ok(_) => println!("400 Sent - Bad Request"),
-        Err(e) => println!("Failed sending response: {}", e),
-    }    
-}
-
-// Processes a valid request for a file and returns the file or 
-// an error (forbidden or not found)
-fn handle_valid_request(mut stream: TcpStream, path: &str) {
-    let is_html = is_html(path);
-    let response = get_file(path);
-    if response == "403" { // File restricted
-        let response = b"HTTP/1.0 403 Forbidden\n";
-        match stream.write(response) {
-            Ok(_) => println!("403 Sent - Forbidden"),
-            Err(e) => println!("Failed sending response: {}", e),
-        }
-    } else if response == "404" { // File not found
-        let response = b"HTTP/1.0 404 File Not Found\n";
-        match stream.write(response) {
-            Ok(_) => println!("404 Sent - File Not Found"),
-            Err(e) => println!("Failed sending response: {}", e),
-        }
-    } else {
-        handle_write(stream, response.clone(), is_html, response.len());
+    match parse_get_request(&request) {
+        None => handle_bad_request(stream, &mut response),
+        Some(path) => handle_get_request(stream, &mut response, &path),
     }
+
+    response
 }
 
 // Reads an input to the server
-fn handle_read(mut stream: &TcpStream) -> String {
+fn read_from_stream(mut stream: &TcpStream) -> String {
     let mut buf = [0u8 ;4096];
     match stream.read(&mut buf) {
         Ok(_) => {
@@ -61,84 +50,123 @@ fn handle_read(mut stream: &TcpStream) -> String {
     }
 }
 
-// Writes a response given the input
-fn handle_write(mut stream: TcpStream, response: String, html: bool, len: usize) {
-    //let response2 = b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n<html><body>Hello world</body></html>\r\n";
-    let mut text_type = "plain";
-    if html {text_type = "html";}
-    let step0 = format!("{}{}{}{}{}","HTTP/1.0 200 OK\r\nWeb-Server/0.1\r\nContent-Type: text/",text_type,"\r\nContent-length: ", len, "\r\n\r\n");
-    let step1 = format!("{}{}",step0, response);
-    let step2 = format!("{}{}", step1, "</body></html>\r\n");
-    match stream.write(step2.as_bytes()) {
-        Ok(_) => println!("Response sent"),
-        Err(e) => println!("Failed sending response: {}", e),
-    }
-}
-
 // Parses a GET request of the form: GET $web_file_path$ HTTP...
 // and formats $web_file_path$ into a standard file path. Returns None if 
 // the request does not follow the above format, else returns Some(file_path)
-fn parse_request(request: &str) -> Option<String> {
+fn parse_get_request(request: &str) -> Option<PathBuf> {
     let re = Regex::new(r"GET (.*) HTTP(?:.*)").unwrap();
     match re.captures(request) {
-        Some(caps) => Some(caps.get(1).unwrap().as_str().to_string().replace("%20", " ")),
+        Some(caps) => Some(PathBuf::from(caps.get(1).unwrap().as_str().to_string().replace("%20", " "))),
         _ => None
     }
 }
 
-#[cfg(test)]
-mod parse_request_tests {
-    use super::*;
-
-    #[test]
-    fn parse_valid_request_test() {
-        let request = "GET /Users/feelmyears/Google%20Drive/Spring%20Quarter/EECS%20395/Homework/eecs-495-hw4/src/main.rs HTTP".to_string();
-        let result = parse_request(&request);
-        assert_eq!(result.unwrap(), "/Users/feelmyears/Google Drive/Spring Quarter/EECS 395/Homework/eecs-495-hw4/src/main.rs".to_string());
+fn handle_get_request(stream: TcpStream, response: &mut Response, path: &PathBuf) {
+    match get_file(path) {
+        None => handle_file_not_found_request(stream, response),
+        Some((file, extension)) => {
+            let is_html = extension == "html";
+            match get_file_contents(file) {
+                None => handle_forbidden_request(stream, response),
+                Some(contents) => handle_content_request(stream, response, contents, is_html)
+            }
+        }
     }
-}     
+}
+
+fn respond(mut stream: TcpStream, response: &str) {
+    match stream.write(response.as_bytes()) {
+        Ok(_) => println!("Successfully responded"),
+        Err(e) => println!("Failed sending response: {}", e),
+    }    
+}
+
+fn handle_bad_request(stream: TcpStream, response: &mut Response) {
+    println!("400 Sent - Bad Request");
+    respond(stream, "HTTP/1.0 400 Bad Request\n");
+    response.status_code = 400;
+}   
+
+
+fn handle_file_not_found_request(stream: TcpStream, response: &mut Response) {
+    println!("404 Sent - Fire Not Found");
+    respond(stream, "HTTP/1.0 404 File Not Found\n");
+    response.status_code = 404;
+}
+
+fn handle_forbidden_request(stream: TcpStream, response: &mut Response) {
+    println!("403 Sent - Forbidden");
+    respond(stream, "HTTP/1.0 403 Forbidden\n");
+    response.status_code = 403;
+}
+
+fn handle_content_request(stream: TcpStream, response: &mut Response, contents: String, is_html: bool) {
+    println!("200 Sent - Content");
+    let text_type = match is_html {
+        true => "html",
+        false => "plain"
+    };
+
+    let len = contents.len();
+    let step0 = format!("{}{}{}{}{}","HTTP/1.0 200 OK\r\nWeb-Server/0.1\r\nContent-Type: text/",text_type,"\r\nContent-length: ", len, "\r\n\r\n");
+    let step1 = format!("{}{}",step0, contents);
+
+    respond(stream, &step1);
+    response.status_code = 200;
+    response.response_size = len;
+}   
 
 // Searches for the correct file, returns "error" is not found
 // If filename leads to a directory, recursively searches for a
 // index file (.html, .shtml, .txt)
-fn get_file(filename: &str) -> String {
-    println!("Attempting to open {}", filename);
-
-    let md = match metadata(filename) {
-        Ok(file) => file,
-        Err(_) => {return "404".to_string();}, 
+fn get_file(path: &PathBuf) -> Option<(File, String)> {
+    println!("Attempting to open {}", path.to_str().unwrap());
+    let md = match metadata(path) {
+        Ok(meta) => meta,
+        Err(_) => return None,
     };
+
     if md.is_dir() {
-        println!("Directory found...attempting to find index.html");
-        let check1 = get_file(format!("{}{}", filename, "/index.html").as_str());
-        if check1 != "404" {return check1;}
-        println!("Directory found...attempting to find index.shtml");
-        let check2 = get_file(format!("{}{}", filename, "/index.shtml").as_str());
-        if check2 != "404" {return check2;}
-        println!("Directory found...attempting to find index.txt");
-        let check3 = get_file(format!("{}{}", filename, "/index.txt").as_str());
-        if check3 != "404" {return check3;}
-        else {return check3;}
+        return get_directory_index_file(path);
+    }
+    
+    let extension = path.extension().unwrap().to_str().unwrap().to_string();
+    match File::open(path) {
+        Ok(file) => Some((file, extension)),
+        Err(_) => None
+    }
+}
+
+fn get_directory_index_file(path: &PathBuf) ->  Option<(File, String)>  {
+    println!("Directory found...attempting to find index file");
+    let file_types = vec!["index.html", "index.shtml", "index.txt"];
+    for &t in &file_types {
+        println!("Attempting to find {}", t);
+        let index_file = get_file(&path.join(t));
+        if index_file.is_some() {
+            return index_file;
+        }
     }
 
-    let mut file = match File::open(filename) {
-        Ok(file) => file,
-        Err(_) => {return "404".to_string();}, 
-    };
-    //let mut file = File::open("/Users/andrewmcconnell/Desktop/Rust/eecs-495-hw4/src/main.rs").expect("Unable to open the file");
+    return None;
+}
+
+fn get_file_contents(mut file: File) -> Option<String> {
     let mut contents = String::new();
     match file.read_to_string(&mut contents) {
-        Ok(_) => {},
-        Err(_) => {return "403".to_string();},
+        Ok(_) => Some(contents),
+        Err(_) => None
     }
-    return contents;
 }
 
-// Checks if the file is of type .html
-// If so returns true
-fn is_html(filename: &str) -> bool {
-    let check_rev: String = filename.chars().rev().take(5).collect(); // returns a reverse string (i.e. "lmth." not ".html")
-    let check: String = check_rev.chars().rev().take(5).collect(); 
-    if check == ".html" {println!("HTML found"); return true;}
-    return false;
-}
+#[cfg(test)]
+mod parse_get_request_tests {
+    use super::*;
+
+    #[test]
+    fn parse_valid_get_request() {
+        let request = "GET /Users/feelmyears/Google%20Drive/Spring%20Quarter/EECS%20395/Homework/eecs-495-hw4/src/main.rs HTTP";
+        let result = parse_get_request(request);
+        assert_eq!(result.unwrap().to_str().unwrap(), "/Users/feelmyears/Google Drive/Spring Quarter/EECS 395/Homework/eecs-495-hw4/src/main.rs");
+    }
+}  
