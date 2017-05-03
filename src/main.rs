@@ -21,24 +21,43 @@
 
 use std::net::TcpListener;
 use std::thread;
-use std::fs::{File, metadata};
+use std::sync::{Arc, Mutex};
+
 mod server_handler;
-use server_handler::handle_client;
+use server_handler::{handle_request, Response, ResponseStatus};
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
-    println!("Listening for connections on port {}", 8080);
+    println!("Listening for connections on port 8080");
+
+    let log_file = Arc::new(Mutex::new(File::create("server_log.txt").unwrap()));
 
     for stream in listener.incoming() {
-        //println!("Connected stream");
+        println!("Connected stream");
+        let lf = log_file.clone();
+
         match stream {
             Ok(stream) => {
-                //println!("Creating thread");
-                thread::spawn(|| {handle_client(stream)});
+                println!("Creating thread");
+                thread::spawn( || {
+                    let response = handle_request(stream);
+                    log_response(&response);
+                });
             }
             Err(e) => {
                 println!("Unable to connect: {}", e);
             }
+        }
+    }
+}
+
+fn log_response(log_file: &Arc<Mutex<File>>, response: &Response) {
+    match response.status {
+        ResponseStatus::OkStatus => {
+
+        },
+        _ => {
+
         }
     }
 }

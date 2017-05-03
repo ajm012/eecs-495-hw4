@@ -7,57 +7,31 @@ use std::path::PathBuf;
 extern crate regex;
 use self::regex::Regex;
 
+pub enum ResponseStatus {
+    OkStatus,
+    BadRequestStatus,
+    ForbiddenStatus,
+    NotFoundStatus
+}
+
+pub struct Response {
+    pub status: ResponseStatus,
+    pub content_type: String,
+    pub content_length: usize,
+    pub content: String
+}
+
 // Central server function - takes and checks input, generates output
-pub fn handle_client(stream: TcpStream) {
-    let input_str = handle_read(&stream);
-    match parse_request(&input_str) {
+pub fn handle_request(stream: TcpStream) -> Response {
+    let request = read_from_stream(&stream);
+    match parse_get_request(&request) {
         None => handle_bad_request(stream),
-        Some(path) => handle_valid_request(stream, &path),
-    }
-}
-
-fn respond_to_request(mut stream: TcpStream, response: &str, log: &str) {
-    match stream.write(response.as_bytes()) {
-        Ok(_) => println!("{}", log),
-        Err(e) => println!("Failed sending response: {}", e),
-    }    
-}
-
-fn handle_bad_request(stream: TcpStream) {
-    let response = "HTTP/1.1 400 Bad Request\n";
-    let log = "400 Sent - Bad Request";
-    respond_to_request(stream, response, log);
-}   
-
-
-fn handle_file_not_found_request(stream: TcpStream) {
-    let response = "HTTP/1.0 404 File Not Found\n";
-    let log = "404 Sent - Fire Not Found";
-    respond_to_request(stream, response, log);
-}
-
-fn handle_forbidden_request(stream: TcpStream) {
-    let response = "HTTP/1.0 403 Forbidden\n";
-    let log = "403 Sent - Forbidden";
-    respond_to_request(stream, response, log);
-}
-
-
-fn handle_valid_request(stream: TcpStream, path: &PathBuf) {
-    match get_file(path) {
-        None => handle_file_not_found_request(stream),
-        Some((file, extension)) => {
-            let is_html = extension == "html";
-            match get_file_contents(file) {
-                None => handle_forbidden_request(stream),
-                Some(contents) => handle_write(stream, contents.clone(), contents.len(), is_html)
-            }
-        }
+        Some(path) => handle_get(stream, &path),
     }
 }
 
 // Reads an input to the server
-fn handle_read(mut stream: &TcpStream) -> String {
+fn read_from_stream(mut stream: &TcpStream) -> String {
     let mut buf = [0u8 ;4096];
     match stream.read(&mut buf) {
         Ok(_) => {
@@ -71,24 +45,10 @@ fn handle_read(mut stream: &TcpStream) -> String {
     }
 }
 
-// Writes a response given the input
-fn handle_write(stream: TcpStream, response: String, len: usize, is_html: bool) {
-    let text_type = match is_html {
-        true => "html",
-        false => "plain"
-    };
-
-    let step0 = format!("{}{}{}{}{}","HTTP/1.0 200 OK\r\nWeb-Server/0.1\r\nContent-Type: text/",text_type,"\r\nContent-length: ", len, "\r\n\r\n");
-    let step1 = format!("{}{}",step0, response);
-    let step2 = format!("{}{}", step1, "</body></html>\r\n");
-
-    respond_to_request(stream, &step2, "Response sent");
-}
-
 // Parses a GET request of the form: GET $web_file_path$ HTTP...
 // and formats $web_file_path$ into a standard file path. Returns None if 
 // the request does not follow the above format, else returns Some(file_path)
-fn parse_request(request: &str) -> Option<PathBuf> {
+fn parse_get_request(request: &str) -> Option<PathBuf> {
     let re = Regex::new(r"GET (.*) HTTP(?:.*)").unwrap();
     match re.captures(request) {
         Some(caps) => Some(PathBuf::from(caps.get(1).unwrap().as_str().to_string().replace("%20", " "))),
@@ -96,17 +56,83 @@ fn parse_request(request: &str) -> Option<PathBuf> {
     }
 }
 
-#[cfg(test)]
-mod parse_request_tests {
-    use super::*;
-
-    #[test]
-    fn parse_valid_request_test() {
-        let request = "GET /Users/feelmyears/Google%20Drive/Spring%20Quarter/EECS%20395/Homework/eecs-495-hw4/src/main.rs HTTP".to_string();
-        let result = parse_request(&request);
-        assert_eq!(result.unwrap(), "/Users/feelmyears/Google Drive/Spring Quarter/EECS 395/Homework/eecs-495-hw4/src/main.rs".to_string());
+fn handle_get(stream: TcpStream, path: &PathBuf) -> Response {
+    match get_file(path) {
+        None => handle_file_not_found_request(stream),
+        Some((file, extension)) => {
+            let is_html = extension == "html";
+            match get_file_contents(file) {
+                None => handle_forbidden_request(stream),
+                Some(contents) => handle_content_request(stream, contents, is_html)
+            }
+        }
     }
-}     
+}
+
+fn respond(mut stream: TcpStream, response: &str) {
+    match stream.write(response.as_bytes()) {
+        Ok(_) => println!("Successfully responded"),
+        Err(e) => println!("Failed sending response: {}", e),
+    }    
+}
+
+fn handle_bad_request(stream: TcpStream) -> Response {
+    println!("400 Sent - Bad Request");
+    let response = "HTTP/1.0 400 Bad Request\n";
+    respond(stream, response);
+    Response {
+        status: ResponseStatus::BadRequestStatus,
+        content_type: "".to_string(),
+        content_length: 0,
+        content: "".to_string()
+    }
+}   
+
+
+fn handle_file_not_found_request(stream: TcpStream) -> Response {
+    println!("404 Sent - Fire Not Found");
+    let response = "HTTP/1.0 404 File Not Found\n";
+    respond(stream, response);
+    Response {
+        status: ResponseStatus::NotFoundStatus,
+        content_type: "".to_string(),
+        content_length: 0,
+        content: "".to_string()
+    }
+}
+
+fn handle_forbidden_request(stream: TcpStream) -> Response {
+    println!("403 Sent - Forbidden");
+    let response = "HTTP/1.0 403 Forbidden\n";
+    respond(stream, response);
+    Response {
+        status: ResponseStatus::ForbiddenStatus,
+        content_type: "".to_string(),
+        content_length: 0,
+        content: "".to_string()
+    }
+}
+
+fn handle_content_request(stream: TcpStream, contents: String, is_html: bool) -> Response {
+    println!("200 Sent - Content");
+    let text_type = match is_html {
+        true => "html",
+        false => "plain"
+    };
+
+    let len = contents.len();
+    let step0 = format!("{}{}{}{}{}","HTTP/1.0 200 OK\r\nWeb-Server/0.1\r\nContent-Type: text/",text_type,"\r\nContent-length: ", len, "\r\n\r\n");
+    let step1 = format!("{}{}",step0, contents);
+    let step2 = format!("{}{}", step1, "</body></html>\r\n");
+
+    respond(stream, &step2);
+    Response {
+        status: ResponseStatus::OkStatus,
+        content_type: text_type.to_string(),
+        content_length: len,
+        content: contents
+    }
+}   
 
 // Searches for the correct file, returns "error" is not found
 // If filename leads to a directory, recursively searches for a
@@ -150,3 +176,15 @@ fn get_file_contents(mut file: File) -> Option<String> {
         Err(_) => None
     }
 }
+
+#[cfg(test)]
+mod parse_get_request_tests {
+    use super::*;
+
+    #[test]
+    fn parse_valid_get_request() {
+        let request = "GET /Users/feelmyears/Google%20Drive/Spring%20Quarter/EECS%20395/Homework/eecs-495-hw4/src/main.rs HTTP";
+        let result = parse_get_request(request);
+        assert_eq!(result.unwrap().to_str().unwrap(), "/Users/feelmyears/Google Drive/Spring Quarter/EECS 395/Homework/eecs-495-hw4/src/main.rs");
+    }
+}  
