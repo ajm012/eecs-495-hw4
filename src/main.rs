@@ -1,12 +1,10 @@
 //! WEB_SERVER
 //! Homework 4
 //!
-//! This program takes an association list as input, as well as  
-//! a start and end point on the graph from user input.
-//! By constructing a specialized graph struct, the program searches
-//! for a path between the two identified points, then requests another
-//! pair. The program terminates when the user inputs a blank line or 
-//! 999.
+//! This program sets up a server listener on port 8080 on the 
+//! local 127.0.0.1 host. It is capable of running the GET call,
+//! which will return the contents of the identified file, assuming
+//! the call conforms to standard syntax.
 //!
 //! ASSUMPTIONS:
 //! -input space after HTTP token will cause faulty response
