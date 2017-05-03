@@ -7,27 +7,32 @@ use std::path::PathBuf;
 extern crate regex;
 use self::regex::Regex;
 
-pub enum ResponseStatus {
-    OkStatus,
-    BadRequestStatus,
-    ForbiddenStatus,
-    NotFoundStatus
-}
+extern crate time;
+use self::time::{now_utc, Tm};
 
 pub struct Response {
-    pub status: ResponseStatus,
-    pub content_type: String,
-    pub content_length: usize,
-    pub content: String
+    pub status_code: usize,
+    pub request: String,
+    pub response_size: usize,
+    pub time: Tm
 }
 
 // Central server function - takes and checks input, generates output
 pub fn handle_request(stream: TcpStream) -> Response {
     let request = read_from_stream(&stream);
+    let mut response = Response {
+        status_code: 0,
+        request: request.clone(),
+        response_size: 0,
+        time: now_utc()
+    };
+
     match parse_get_request(&request) {
-        None => handle_bad_request(stream),
-        Some(path) => handle_get(stream, &path),
+        None => handle_bad_request(stream, &mut response),
+        Some(path) => handle_get_request(stream, &mut response, &path),
     }
+
+    response
 }
 
 // Reads an input to the server
@@ -56,14 +61,14 @@ fn parse_get_request(request: &str) -> Option<PathBuf> {
     }
 }
 
-fn handle_get(stream: TcpStream, path: &PathBuf) -> Response {
+fn handle_get_request(stream: TcpStream, response: &mut Response, path: &PathBuf) {
     match get_file(path) {
-        None => handle_file_not_found_request(stream),
+        None => handle_file_not_found_request(stream, response),
         Some((file, extension)) => {
             let is_html = extension == "html";
             match get_file_contents(file) {
-                None => handle_forbidden_request(stream),
-                Some(contents) => handle_content_request(stream, contents, is_html)
+                None => handle_forbidden_request(stream, response),
+                Some(contents) => handle_content_request(stream, response, contents, is_html)
             }
         }
     }
@@ -76,44 +81,26 @@ fn respond(mut stream: TcpStream, response: &str) {
     }    
 }
 
-fn handle_bad_request(stream: TcpStream) -> Response {
+fn handle_bad_request(stream: TcpStream, response: &mut Response) {
     println!("400 Sent - Bad Request");
-    let response = "HTTP/1.0 400 Bad Request\n";
-    respond(stream, response);
-    Response {
-        status: ResponseStatus::BadRequestStatus,
-        content_type: "".to_string(),
-        content_length: 0,
-        content: "".to_string()
-    }
+    respond(stream, "HTTP/1.0 400 Bad Request\n");
+    response.status_code = 400;
 }   
 
 
-fn handle_file_not_found_request(stream: TcpStream) -> Response {
+fn handle_file_not_found_request(stream: TcpStream, response: &mut Response) {
     println!("404 Sent - Fire Not Found");
-    let response = "HTTP/1.0 404 File Not Found\n";
-    respond(stream, response);
-    Response {
-        status: ResponseStatus::NotFoundStatus,
-        content_type: "".to_string(),
-        content_length: 0,
-        content: "".to_string()
-    }
+    respond(stream, "HTTP/1.0 404 File Not Found\n");
+    response.status_code = 404;
 }
 
-fn handle_forbidden_request(stream: TcpStream) -> Response {
+fn handle_forbidden_request(stream: TcpStream, response: &mut Response) {
     println!("403 Sent - Forbidden");
-    let response = "HTTP/1.0 403 Forbidden\n";
-    respond(stream, response);
-    Response {
-        status: ResponseStatus::ForbiddenStatus,
-        content_type: "".to_string(),
-        content_length: 0,
-        content: "".to_string()
-    }
+    respond(stream, "HTTP/1.0 403 Forbidden\n");
+    response.status_code = 403;
 }
 
-fn handle_content_request(stream: TcpStream, contents: String, is_html: bool) -> Response {
+fn handle_content_request(stream: TcpStream, response: &mut Response, contents: String, is_html: bool) {
     println!("200 Sent - Content");
     let text_type = match is_html {
         true => "html",
@@ -123,15 +110,10 @@ fn handle_content_request(stream: TcpStream, contents: String, is_html: bool) ->
     let len = contents.len();
     let step0 = format!("{}{}{}{}{}","HTTP/1.0 200 OK\r\nWeb-Server/0.1\r\nContent-Type: text/",text_type,"\r\nContent-length: ", len, "\r\n\r\n");
     let step1 = format!("{}{}",step0, contents);
-    let step2 = format!("{}{}", step1, "</body></html>\r\n");
 
-    respond(stream, &step2);
-    Response {
-        status: ResponseStatus::OkStatus,
-        content_type: text_type.to_string(),
-        content_length: len,
-        content: contents
-    }
+    respond(stream, &step1);
+    response.status_code = 200;
+    response.response_size = len;
 }   
 
 // Searches for the correct file, returns "error" is not found

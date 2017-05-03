@@ -19,12 +19,17 @@
 //! GET /a/b/c HTTP - 404 File Not Found
 //! a b c - 400 Bad Request
 
+use std::io::Write;
 use std::net::TcpListener;
 use std::thread;
+use std::fs::File;
 use std::sync::{Arc, Mutex};
 
 mod server_handler;
-use server_handler::{handle_request, Response, ResponseStatus};
+use server_handler::{handle_request, Response};
+
+extern crate time;
+// use time::{Tm};
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
@@ -39,9 +44,9 @@ fn main() {
         match stream {
             Ok(stream) => {
                 println!("Creating thread");
-                thread::spawn( || {
+                thread::spawn(move || {
                     let response = handle_request(stream);
-                    log_response(&response);
+                    log_response(&lf, &response);
                 });
             }
             Err(e) => {
@@ -52,12 +57,11 @@ fn main() {
 }
 
 fn log_response(log_file: &Arc<Mutex<File>>, response: &Response) {
-    match response.status {
-        ResponseStatus::OkStatus => {
+    // Trying to follow format specified in https://en.wikipedia.org/wiki/Common_Log_Format
+    // 127.0.0.1 user-identifier frank [10/Oct/2000:13:55:36 -0700] "GET /apache_pb.gif HTTP/1.0" 200 2326
 
-        },
-        _ => {
-
-        }
-    }
+    let mut log_file_guard = log_file.lock().unwrap();
+    let output = format!("[{}] \"{}\" {} {}", response.time.rfc3339(), response.request, response.status_code, response.response_size);
+    println!("{}", output);
+    log_file_guard.write(output.as_bytes()).expect("Failed to log response");
 }
