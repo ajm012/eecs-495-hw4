@@ -113,12 +113,8 @@ fn handle_content_request(stream: TcpStream, response: &mut Response, contents: 
     };
 
     let len = contents.len();
-    // let step0 = format!("{}{}{}{}{}","HTTP/1.0 200 OK\r\nWeb-Server/0.1\r\nContent-Type: text/",text_type,"\r\nContent-length: ", len, "\r\n\r\n");
-    // let step1 = format!("{}{}\n",step0, contents);
-
     let content_response = format!("HTTP/1.0 200 OK\r\nWeb-Server/1.0\r\nConent-type: text/{}\r\nContent-length: {}\r\n\r\n{}\n", text_type, len, contents);
 
-    // respond(stream, &step1);
     respond(stream, &content_response);
     response.status_code = 200;
     response.response_size = len;
