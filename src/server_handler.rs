@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 use std::fs::{File, metadata};
 use std::string::String;
 use std::path::PathBuf;
+use std::env::current_dir;
 
 extern crate regex;
 use self::regex::Regex;
@@ -63,7 +64,10 @@ fn parse_get_request(request: &str) -> Option<PathBuf> {
 
 // Handles a properly formatted get request
 fn handle_get_request(stream: TcpStream, response: &mut Response, path: &PathBuf) {
-    match get_file(path) {
+    let full_path = (current_dir().unwrap())
+        .join(PathBuf::from(path.to_str().unwrap().trim_left_matches('/')));
+    println!("The full path is {}", full_path.display());
+    match get_file(&full_path) {
         None => handle_file_not_found_request(stream, response),
         Some((file, extension)) => {
             let is_html = extension == "html";
@@ -92,7 +96,7 @@ fn handle_bad_request(stream: TcpStream, response: &mut Response) {
 
 // Responds with a 404 File Not Found response
 fn handle_file_not_found_request(stream: TcpStream, response: &mut Response) {
-    println!("404 Sent - Fire Not Found");
+    println!("404 Sent - File Not Found");
     respond(stream, "HTTP/1.0 404 File Not Found\n");
     response.status_code = 404;
 }
